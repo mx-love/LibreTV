@@ -39,14 +39,17 @@ const API_SITES = {
         api: 'https://tyyszy.com/api.php/provide/vod',
         name: '天涯资源',
     },
-    xiaomaomi: {
+   /* xiaomaomi: {
         api: 'https://zy.xmm.hk/api.php/provide/vod',
-        name: '小猫咪资源',
-    },
+        name: '小猫咪资源', 
+    },  */
+    
     ffzy: {
-        api: 'http://ffzy5.tv/api.php/provide/vod',
-        name: '非凡影视',
-        detail: 'http://ffzy5.tv', 
+    api: 'https://cj.ffzyapi.com/api.php/provide/vod',
+    name: '非凡资源',
+    detail: 'https://cj.ffzyapi.com',
+    // 添加状态标记
+    status: 'testing' // 或 'inactive' 如果确认无数据
     },
     heimuer: {
         api: 'https://json.heimuer.xyz/api.php/provide/vod',
