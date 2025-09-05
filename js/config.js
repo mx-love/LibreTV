@@ -65,7 +65,7 @@ const API_SITES = {
     jisu: {
         api: 'https://jszyapi.com',
         name: '极速资源',
-        detail: 'https://jszyapi.com'
+        detail: 'https://jszyapi.com',
     },
     dbzy: {
         api: 'https://dbzy.com',
@@ -81,7 +81,7 @@ const API_SITES = {
     },
     zuid: {
         api: 'https://api.zuidapi.com',
-        name: '最大资源'
+        name: '最大资源',
     },
     yinghua: {
         api: 'https://m3u8.apiyhzy.com',
@@ -92,11 +92,11 @@ const API_SITES = {
     },
     wujin: {
         api: 'https://api.wujinapi.me',
-        name: '无尽资源'
+        name: '无尽资源',
     },
     ikun: {
         api: 'https://ikunzyapi.com',
-        name: 'iKun资源'
+        name: 'iKun资源',
     },
     testSource: {
         api: 'https://www.example.com',
