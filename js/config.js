@@ -49,11 +49,6 @@ const API_SITES = {
         // 添加状态标记
         status: 'testing' // 或 'inactive' 如果确认无数据
     },
-    heimuer: {
-        api: 'https://json.heimuer.xyz',
-        name: '黑木耳',
-        detail: 'https://heimuer.tv',
-    },
     zy360: {
         api: 'https://360zy.com',
         name: '360资源',
@@ -61,10 +56,6 @@ const API_SITES = {
     wolong: {
         api: 'https://wolongzyw.com',
         name: '卧龙资源',
-    },
-    hwba: {
-        api: 'https://cjhwba.com',
-        name: '华为吧资源',
     },
     jisu: {
         api: 'https://jszyapi.com/api.php/provide/vod',
@@ -100,7 +91,7 @@ const API_SITES = {
         name: 'iKun资源'
     },
     lzi: {
-        api: 'https://lzizy.net',
+        api: 'https://cj.lziapi.com/api.php/provide/vod',
         name: '量子资源站',
     },
     testSource: {
@@ -108,6 +99,15 @@ const API_SITES = {
         name: '空内容测试源',
         adult: true
     },
+   //下面是资源失效率高的API源，不建议使用
+    subo: {
+        api: 'https://subocaiji.com/api.php/provide/vod',
+        name: '速播资源',
+    ukzy: {
+        api: 'https://api.ukuapi88.com/api.php/provide/vod',
+        name: 'U酷资源'
+    },
+    //ARCHIVE https://telegra.ph/APIs-08-12
 };
 
 // 添加聚合搜索的配置选项
