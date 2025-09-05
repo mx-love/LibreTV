@@ -94,21 +94,27 @@ const API_SITES = {
     },
     yinghua: {
         api: 'https://m3u8.apiyhzy.com/api.php/provide/vod',
-        name: '樱花资源',
-        detail:"https://yhzy.cc"，
+        name: '樱花资源'
+    },
+    baidu: {
+        api: 'https://api.apibdzy.com/api.php/provide/vod',
+        name: '百度云资源'
     },
     wujin: {
         api: 'https://api.wujinapi.me/api.php/provide/vod',
         name: '无尽资源'
+    },
+    wwzy: {
+        api: 'https://wwzy.tv/api.php/provide/vod',
+        name: '旺旺短剧'
     },
     ikun: {
         api: 'https://ikunzyapi.com/api.php/provide/vod',
         name: 'iKun资源'
     },
     lzi: {
-        api: 'https://lzizy.net/api.php/provide/vod',
-        name: '量子资源站',
-        detail: 'https://lzizy.net',
+        api: 'https://cj.lziapi.com/api.php/provide/vod/',
+        name: '量子资源站'
     },
     testSource: {
         api: 'https://www.example.com/api.php/provide/vod',
@@ -120,6 +126,10 @@ const API_SITES = {
     subo: {
         api: 'https://subocaiji.com/api.php/provide/vod',
         name: '速播资源'
+    },
+    fczy: {
+        api: 'https://api.fczy888.me/api.php/provide/vod',
+        name: '蜂巢资源'
     },
     ukzy: {
         api: 'https://api.ukuapi88.com/api.php/provide/vod',
