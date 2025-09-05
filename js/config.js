@@ -60,7 +60,7 @@ const API_SITES = {
     jisu: {
         api: 'https://jszyapi.com/api.php/provide/vod',
         name: '极速资源',
-        detail: 'https://jszyapi.com'
+        detail: 'https://jszyapi.com',
     },
     dbzy: {
         api: 'https://dbzy.tv/api.php/provide/vod',
@@ -76,7 +76,11 @@ const API_SITES = {
     },
     zuid: {
         api: 'https://api.zuidapi.com',
-        name: '最大资源'
+        name: '最大资源',
+    },
+    iqiyi: {
+        api: 'https://iqiyizyapi.com/api.php/provide/vod',
+        name: 'iqiyi资源',
     },
     yinghua: {
         api: 'https://yhzy.cc',
@@ -88,7 +92,7 @@ const API_SITES = {
     },
     ikun: {
         api: 'https://ikunzyapi.com',
-        name: 'iKun资源'
+        name: 'iKun资源',
     },
     lzi: {
         api: 'https://cj.lziapi.com/api.php/provide/vod',
@@ -102,7 +106,8 @@ const API_SITES = {
    //下面是资源失效率高的API源，不建议使用
     subo: {
         api: 'https://subocaiji.com/api.php/provide/vod',
-        name: '速播资源',
+        name: '速播资源'
+    },        
     ukzy: {
         api: 'https://api.ukuapi88.com/api.php/provide/vod',
         name: 'U酷资源'
