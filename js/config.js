@@ -67,12 +67,12 @@ const API_SITES = {
         name: '华为吧资源',
     },
     jisu: {
-        api: 'https://jszyapi.com',
+        api: 'https://jszyapi.com/api.php/provide/vod',
         name: '极速资源',
         detail: 'https://jszyapi.com'
     },
     dbzy: {
-        api: 'https://dbzy.com',
+        api: 'https://dbzy.tv/api.php/provide/vod',
         name: '豆瓣资源',
     },
     mozhua: {
@@ -88,9 +88,8 @@ const API_SITES = {
         name: '最大资源'
     },
     yinghua: {
-        api: 'https://m3u8.apiyhzy.com',
+        api: 'https://yhzy.cc',
         name: '樱花资源',
-        detail:"https://yhzy.cc",
     },
     wujin: {
         api: 'https://api.wujinapi.me',
@@ -101,9 +100,8 @@ const API_SITES = {
         name: 'iKun资源'
     },
     lzi: {
-        api: 'https://lzizy.net/api.php/provide/vod',
+        api: 'https://lzizy.net',
         name: '量子资源站',
-        detail: 'https://lzizy.net',
     },
     testSource: {
         api: 'https://www.example.com',
