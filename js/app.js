@@ -804,6 +804,19 @@ async function search() {
             });
         }
 
+	// 过滤短剧内容
+        allResults = allResults.filter(item => {
+            const typeName = item.type_name || '';
+            const vodName = item.vod_name || '';
+            
+            // 短剧关键词过滤
+            const shortDramaKeywords = ['短剧', '微短剧', '竖屏剧', '小短剧'];
+            
+            return !shortDramaKeywords.some(keyword => 
+                typeName.includes(keyword) || vodName.includes(keyword)
+            );
+        });
+
         // 添加XSS保护，使用textContent和属性转义
         const safeResults = allResults.map(item => {
             const safeId = item.vod_id ? item.vod_id.toString().replace(/[^\w-]/g, '') : '';
