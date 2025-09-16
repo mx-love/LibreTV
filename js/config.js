@@ -94,9 +94,9 @@ const API_SITES = {
         api: 'https://ikunzyapi.com',
         name: 'iKun资源',
     },
-    lzi: {
-        api: 'https://cj.lziapi.com/api.php/provide/vod',
-        name: '量子资源站',
+    maoyan: {
+        api: 'https://api.maoyanapi.top/api.php/provide/vod',
+        name: '猫眼资源',
     },
     testSource: {
         api: 'https://www.example.com',
