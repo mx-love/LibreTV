@@ -1,5 +1,5 @@
 const selectedAPIs = JSON.parse(localStorage.getItem('selectedAPIs') || '[]');
-const customAPIs = JSON.parse(localStorage.getItem('customAPIs') || '[]'); // 存储自定义API列表
+const customAPIs = JSON.parse(localStorage.getItem('customAPIs') || '[]');
 
 // 弹幕 API 配置
 const DANMU_API_URL = 'https://danmu.manxue.eu.org/87654321';
@@ -75,6 +75,44 @@ let shortcutHintTimeout = null;
 let adFilteringEnabled = true;
 let progressSaveInterval = null;
 let currentVideoUrl = '';
+let danmakuData = []; // 缓存弹幕数据
+
+// 弹幕配置默认值
+const DEFAULT_DANMAKU_CONFIG = {
+    speed: 5,
+    opacity: 1,
+    fontSize: 25,
+    color: '#FFFFFF',
+    mode: 0,
+    margin: [10, '25%'],
+    antiOverlap: true,
+    useWorker: true,
+    synchronousPlayback: false
+};
+
+// 从 localStorage 加载弹幕配置
+function loadDanmakuConfig() {
+    try {
+        const saved = localStorage.getItem('danmakuConfig');
+        if (saved) {
+            const config = JSON.parse(saved);
+            return { ...DEFAULT_DANMAKU_CONFIG, ...config };
+        }
+    } catch (e) {
+        console.error('加载弹幕配置失败:', e);
+    }
+    return { ...DEFAULT_DANMAKU_CONFIG };
+}
+
+// 保存弹幕配置
+function saveDanmakuConfig(config) {
+    try {
+        localStorage.setItem('danmakuConfig', JSON.stringify(config));
+    } catch (e) {
+        console.error('保存弹幕配置失败:', e);
+    }
+}
+
 const isWebkit = (typeof window.webkitConvertPointFromNodeToPage === 'function')
 Artplayer.FULLSCREEN_WEB_IN_BODY = true;
 
@@ -177,10 +215,20 @@ function initializePageContent() {
     document.getElementById('videoTitle').textContent = currentVideoTitle;
 
     if (videoUrl) {
-        initPlayer(videoUrl);
-    } else {
-        showError('无效的视频链接');
-    }
+		// 先预加载弹幕，等待完成后再初始化播放器
+		preloadDanmaku()
+			.then(() => {
+				console.log('首次加载：弹幕预加载完成，弹幕数量:', danmakuData.length);
+				initPlayer(videoUrl);
+			})
+			.catch(e => {
+				console.error('预加载弹幕失败:', e);
+				// 即使弹幕加载失败也要初始化播放器
+				initPlayer(videoUrl);
+			});
+	} else {
+		showError('无效的视频链接');
+	}
 
     renderResourceInfoBar();
     updateEpisodeInfo();
@@ -438,11 +486,88 @@ async function loadDanmaku() {
         
         console.log(`成功加载 ${danmakuList.length} 条弹幕`);
         showToast(`已加载 ${danmakuList.length} 条弹幕`, 'success');
+        danmakuData = danmakuList; // 缓存弹幕数据
         
         return danmakuList;
     } catch (error) {
         console.error('加载弹幕失败:', error);
         showToast('弹幕加载失败', 'error');
+        return [];
+    }
+}
+
+// 预加载弹幕（不依赖播放器）
+async function preloadDanmaku() {
+    try {
+        const episodeTitle = currentEpisodes[currentEpisodeIndex]?.title || '';
+        const episodeMatch = episodeTitle.match(/第?\s*(\d+)\s*集|EP?\s*(\d+)|#(\d+)#/i);
+        const episodeNumber = episodeMatch ? 
+            parseInt(episodeMatch[1] || episodeMatch[2] || episodeMatch[3]) : 
+            currentEpisodeIndex + 1;
+        
+        console.log(`预加载弹幕: 标题=${currentVideoTitle}, 集数=${episodeNumber}`);
+        
+        const searchRes = await fetch(
+            `${DANMU_API_URL}/api/v2/search/anime?keyword=${encodeURIComponent(currentVideoTitle)}`
+        );
+        const searchData = await searchRes.json();
+        
+        if (!searchData.animes || searchData.animes.length === 0) {
+            return [];
+        }
+        
+        const animeId = searchData.animes[0].animeId;
+        const detailRes = await fetch(`${DANMU_API_URL}/api/v2/bangumi/${animeId}`);
+        const detailData = await detailRes.json();
+        
+        const episodes = detailData.bangumi.episodes || [];
+        let episode = episodes.find(ep => parseInt(ep.episodeNumber) === episodeNumber);
+        if (!episode && episodes[currentEpisodeIndex]) {
+            episode = episodes[currentEpisodeIndex];
+        }
+        
+        if (!episode) {
+            return [];
+        }
+        
+        const commentRes = await fetch(
+            `${DANMU_API_URL}/api/v2/comment/${episode.episodeId}?withRelated=true&chConvert=1`
+        );
+        const commentData = await commentRes.json();
+        
+        if (!commentData.comments || commentData.comments.length === 0) {
+            return [];
+        }
+        
+        const danmakuList = commentData.comments
+            .filter(c => c && c.m && typeof c.p !== 'undefined')
+            .map(c => {
+                let color = '#FFFFFF';
+                if (c.c !== undefined && c.c !== null) {
+                    try {
+                        const colorNum = parseInt(c.c);
+                        if (!isNaN(colorNum)) {
+                            color = `#${colorNum.toString(16).padStart(6, '0')}`;
+                        }
+                    } catch (e) {
+                        console.warn('颜色转换失败:', c.c);
+                    }
+                }
+                
+                return {
+                    text: String(c.m || ''),
+                    time: parseFloat(c.p) / 1000 || 0,
+                    color: color,
+                    mode: parseInt(c.mode) || 0
+                };
+            })
+            .filter(d => d.text.trim().length > 0);
+        
+        console.log(`预加载完成 ${danmakuList.length} 条弹幕`);
+        danmakuData = danmakuList;
+        return danmakuList;
+    } catch (error) {
+        console.error('预加载弹幕失败:', error);
         return [];
     }
 }
@@ -487,25 +612,29 @@ function initPlayer(videoUrl) {
     };
 
     // 配置 ArtPlayer 插件
-    const plugins = [];
+	const plugins = [];
+
+	// 如果有 artplayerPluginDanmuku 插件，添加弹幕功能
+	if (typeof artplayerPluginDanmuku !== 'undefined') {
+		const savedConfig = loadDanmakuConfig();
     
-    // 如果有 artplayerPluginDanmuku 插件，添加弹幕功能
-    if (typeof artplayerPluginDanmuku !== 'undefined') {
-        plugins.push(
-            artplayerPluginDanmuku({
-                danmuku: loadDanmaku,
-                speed: 5,
-                opacity: 1,
-                fontSize: 25,
-                color: '#FFFFFF',
-                mode: 0,
-                margin: [10, '25%'],
-                antiOverlap: true,
-                useWorker: true,
-                synchronousPlayback: false
-            })
-        );
-    }
+		console.log('初始化弹幕插件，当前弹幕数量:', danmakuData.length);
+    
+		plugins.push(
+			artplayerPluginDanmuku({
+				danmuku: danmakuData.length > 0 ? danmakuData : [], // 使用已加载的弹幕
+				speed: savedConfig.speed,
+				opacity: savedConfig.opacity,
+				fontSize: savedConfig.fontSize,
+				color: savedConfig.color,
+				mode: savedConfig.mode,
+				margin: savedConfig.margin,
+				antiOverlap: savedConfig.antiOverlap,
+				useWorker: savedConfig.useWorker,
+				synchronousPlayback: savedConfig.synchronousPlayback
+			})
+		);
+	}
 
     art = new Artplayer({
         container: '#player',
@@ -564,116 +693,145 @@ function initPlayer(videoUrl) {
                     document.getElementById('error').style.display = 'none';
                 });
 
-                video.addEventListener('timeupdate', function () {
-                    if (video.currentTime > 1) {
-                        document.getElementById('error').style.display = 'none';
-                    }
-                });
+				video.addEventListener('timeupdate', function () {
+					if (video.currentTime > 1) {
+							document.getElementById('error').style.display = 'none';
+					}
+				});
 
-                hls.loadSource(url);
-                hls.attachMedia(video);
+				hls.loadSource(url);
+				hls.attachMedia(video);
+				
+				let sourceElement = video.querySelector('source');
+				if (sourceElement) {
+					sourceElement.src = videoUrl;
+				} else {
+					sourceElement = document.createElement('source');
+					sourceElement.src = videoUrl;
+					video.appendChild(sourceElement);
+				}
+				video.disableRemotePlayback = false;
 
-                let sourceElement = video.querySelector('source');
-                if (sourceElement) {
-                    sourceElement.src = videoUrl;
-                } else {
-                    sourceElement = document.createElement('source');
-                    sourceElement.src = videoUrl;
-                    video.appendChild(sourceElement);
-                }
-                video.disableRemotePlayback = false;
+				hls.on(Hls.Events.MANIFEST_PARSED, function () {
+					video.play().catch(e => {
+					});
+				});
+	
+				hls.on(Hls.Events.ERROR, function (event, data) {
+					errorCount++;
 
-                hls.on(Hls.Events.MANIFEST_PARSED, function () {
-                    video.play().catch(e => {
-                    });
-                });
+					if (data.details === 'bufferAppendError') {
+						bufferAppendErrorCount++;
+						if (playbackStarted) {
+							return;
+						}
 
-                hls.on(Hls.Events.ERROR, function (event, data) {
-                    errorCount++;
+						if (bufferAppendErrorCount >= 3) {
+							hls.recoverMediaError();
+						}
+					}
+	
+					if (data.fatal && !playbackStarted) {
+						switch (data.type) {
+							case Hls.ErrorTypes.NETWORK_ERROR:
+								hls.startLoad();
+								break;
+							case Hls.ErrorTypes.MEDIA_ERROR:
+								hls.recoverMediaError();
+								break;
+							default:
+								if (errorCount > 3 && !errorDisplayed) {
+									errorDisplayed = true;
+									showError('视频加载失败，可能是格式不兼容或源不可用');
+								}
+								break;
+						}
+					}
+				});
 
-                    if (data.details === 'bufferAppendError') {
-                        bufferAppendErrorCount++;
-                        if (playbackStarted) {
-                            return;
-                        }
+					hls.on(Hls.Events.FRAG_LOADED, function () {
+						document.getElementById('player-loading').style.display = 'none';
+					});
 
-                        if (bufferAppendErrorCount >= 3) {
-                            hls.recoverMediaError();
-                        }
-                    }
+					hls.on(Hls.Events.LEVEL_LOADED, function () {
+						document.getElementById('player-loading').style.display = 'none';
+					});
+				}
+			}
+		});
 
-                    if (data.fatal && !playbackStarted) {
-                        switch (data.type) {
-                            case Hls.ErrorTypes.NETWORK_ERROR:
-                                hls.startLoad();
-                                break;
-                            case Hls.ErrorTypes.MEDIA_ERROR:
-                                hls.recoverMediaError();
-                                break;
-                            default:
-                                if (errorCount > 3 && !errorDisplayed) {
-                                    errorDisplayed = true;
-                                    showError('视频加载失败，可能是格式不兼容或源不可用');
-                                }
-                                break;
-                        }
-                    }
-                });
+		let hideTimer;
 
-                hls.on(Hls.Events.FRAG_LOADED, function () {
-                    document.getElementById('player-loading').style.display = 'none';
-                });
-
-                hls.on(Hls.Events.LEVEL_LOADED, function () {
-                    document.getElementById('player-loading').style.display = 'none';
-                });
-            }
+		function hideControls() {
+			if (art && art.controls) {
+				art.controls.show = false;
         }
-    });
+		}
 
-    let hideTimer;
+		function resetHideTimer() {
+			clearTimeout(hideTimer);
+			hideTimer = setTimeout(() => {
+				hideControls();
+			}, Artplayer.CONTROL_HIDE_TIME);
+		}
 
-    function hideControls() {
-        if (art && art.controls) {
-            art.controls.show = false;
-        }
-    }
+		function handleMouseOut(e) {
+			if (e && !e.relatedTarget) {
+				resetHideTimer();
+			}
+		}
 
-    function resetHideTimer() {
-        clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => {
-            hideControls();
-        }, Artplayer.CONTROL_HIDE_TIME);
-    }
+		function handleFullScreen(isFullScreen, isWeb) {
+			if (isFullScreen) {
+				document.addEventListener('mouseout', handleMouseOut);
+			} else {
+				document.removeEventListener('mouseout', handleMouseOut);
+				clearTimeout(hideTimer);
+			}
 
-    function handleMouseOut(e) {
-        if (e && !e.relatedTarget) {
-            resetHideTimer();
-        }
-    }
+			if (!isWeb) {
+				if (window.screen.orientation && window.screen.orientation.lock) {
+					window.screen.orientation.lock('landscape')
+						.then(() => {
+						})
+						.catch((error) => {
+						});
+				}
+			}
+		}
 
-    function handleFullScreen(isFullScreen, isWeb) {
-        if (isFullScreen) {
-            document.addEventListener('mouseout', handleMouseOut);
-        } else {
-            document.removeEventListener('mouseout', handleMouseOut);
-            clearTimeout(hideTimer);
-        }
+		art.on('ready', () => {
+    hideControls();
+    
+		// 监听弹幕配置变化并保存
+		if (art.plugins && art.plugins.artplayerPluginDanmuku) {
+			const danmakuPlugin = art.plugins.artplayerPluginDanmuku;
+			const originalConfig = loadDanmakuConfig();
+        
+			setInterval(() => {
+				if (danmakuPlugin.option) {
+					const currentConfig = {
+						speed: danmakuPlugin.option.speed,
+						opacity: danmakuPlugin.option.opacity,
+						fontSize: danmakuPlugin.option.fontSize,
+						color: danmakuPlugin.option.color,
+						mode: danmakuPlugin.option.mode,
+						margin: danmakuPlugin.option.margin,
+						antiOverlap: danmakuPlugin.option.antiOverlap,
+						useWorker: danmakuPlugin.option.useWorker,
+						synchronousPlayback: danmakuPlugin.option.synchronousPlayback
+					};
+                
+					if (JSON.stringify(currentConfig) !== JSON.stringify(originalConfig)) {
+						saveDanmakuConfig(currentConfig);
+						Object.assign(originalConfig, currentConfig);
+					}
+				}
+			}, 2000);
+		}
+	});
 
-        if (!isWeb) {
-            if (window.screen.orientation && window.screen.orientation.lock) {
-                window.screen.orientation.lock('landscape')
-                    .then(() => {
-                    })
-                    .catch((error) => {
-                    });
-            }
-        }
-    }
-
-    art.on('ready', () => {
-        hideControls();
-    });
+	// 在视频可以播放时加载弹幕
 
     art.on('fullscreenWeb', function (isFullScreen) {
         handleFullScreen(isFullScreen, true);
@@ -896,11 +1054,21 @@ function playEpisode(index) {
         progressSaveInterval = null;
     }
 
+    // 立即销毁旧播放器
+    if (art) {
+        try {
+            art.destroy();
+            art = null;
+        } catch (e) {
+            console.error('销毁播放器失败:', e);
+        }
+    }
+
     document.getElementById('error').style.display = 'none';
     document.getElementById('player-loading').style.display = 'flex';
     document.getElementById('player-loading').innerHTML = `
         <div class="loading-spinner"></div>
-        <div>正在加载视频...</div>
+        <div>正在加载视频和弹幕...</div>
     `;
 
     const urlParams2 = new URLSearchParams(window.location.search);
@@ -911,6 +1079,7 @@ function playEpisode(index) {
     currentEpisodeIndex = index;
     currentVideoUrl = url;
     videoHasEnded = false;
+    danmakuData = []; // 清空弹幕缓存
 
     clearVideoProgress();
 
@@ -920,11 +1089,18 @@ function playEpisode(index) {
     currentUrl.searchParams.delete('position');
     window.history.replaceState({}, '', currentUrl.toString());
 
-    if (isWebkit) {
-        initPlayer(url);
-    } else {
-        art.switch = url;
-    }
+    // 先预加载弹幕，等待完成后再初始化播放器
+	preloadDanmaku()
+		.then(() => {
+			console.log('弹幕预加载完成，开始初始化播放器，弹幕数量:', danmakuData.length);
+			// 确保弹幕数据已经准备好再初始化播放器
+			initPlayer(url);
+		})
+		.catch(e => {
+			console.error('预加载弹幕失败:', e);
+			// 即使弹幕加载失败，也要初始化播放器
+			initPlayer(url);
+		});
 
     updateEpisodeInfo();
     updateButtonStates();
