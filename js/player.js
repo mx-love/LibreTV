@@ -132,7 +132,7 @@ document.addEventListener('passwordVerified', () => {
 });
 
 // 初始化页面内容
-function initializePageContent() {
+async function initializePageContent() {
     const urlParams = new URLSearchParams(window.location.search);
     let videoUrl = urlParams.get('url');
     const title = urlParams.get('title');
@@ -215,10 +215,22 @@ function initializePageContent() {
     document.getElementById('videoTitle').textContent = currentVideoTitle;
 
 	if (videoUrl) {
-		// 弹幕在后台加载，不阻塞视频
-		preloadDanmaku().catch(e => console.error('预加载弹幕失败:', e));
-		initPlayer(videoUrl);
-	} else {
+    try {
+        console.log('开始加载弹幕数据，请稍候...');
+        // 使用 await 关键字，程序会在这里暂停，直到 preloadDanmaku() 执行完毕
+        await preloadDanmaku(); 
+        console.log('弹幕数据加载完成!');
+        
+        // 只有在上面 await 成功之后，才会执行这一行
+        initPlayer(videoUrl);
+
+    } catch (e) {
+        console.error('加载弹幕过程中发生错误:', e);
+        // 即使弹幕加载失败了，我们依然要初始化播放器，确保视频可以播放
+        // 所以在 catch 块里也调用一次 initPlayer
+        initPlayer(videoUrl);
+    }
+} else {
 		showError('无效的视频链接');
 	}
 
@@ -615,6 +627,7 @@ function initPlayer(videoUrl) {
 		plugins.push(
 			artplayerPluginDanmuku({
 				danmuku: () => danmakuData, // 改为函数，动态获取弹幕
+				emitter: true,
 				speed: savedConfig.speed,
 				opacity: savedConfig.opacity,
 				fontSize: savedConfig.fontSize,
