@@ -214,18 +214,10 @@ function initializePageContent() {
     document.title = currentVideoTitle + ' - LibreTV播放器';
     document.getElementById('videoTitle').textContent = currentVideoTitle;
 
-    if (videoUrl) {
-		// 先预加载弹幕，等待完成后再初始化播放器
-		preloadDanmaku()
-			.then(() => {
-				console.log('首次加载：弹幕预加载完成，弹幕数量:', danmakuData.length);
-				initPlayer(videoUrl);
-			})
-			.catch(e => {
-				console.error('预加载弹幕失败:', e);
-				// 即使弹幕加载失败也要初始化播放器
-				initPlayer(videoUrl);
-			});
+	if (videoUrl) {
+		// 弹幕在后台加载，不阻塞视频
+		preloadDanmaku().catch(e => console.error('预加载弹幕失败:', e));
+		initPlayer(videoUrl);
 	} else {
 		showError('无效的视频链接');
 	}
@@ -622,7 +614,7 @@ function initPlayer(videoUrl) {
     
 		plugins.push(
 			artplayerPluginDanmuku({
-				danmuku: danmakuData.length > 0 ? danmakuData : [], // 使用已加载的弹幕
+				danmuku: () => danmakuData, // 改为函数，动态获取弹幕
 				speed: savedConfig.speed,
 				opacity: savedConfig.opacity,
 				fontSize: savedConfig.fontSize,
@@ -631,21 +623,27 @@ function initPlayer(videoUrl) {
 				margin: savedConfig.margin,
 				antiOverlap: savedConfig.antiOverlap,
 				useWorker: savedConfig.useWorker,
-				synchronousPlayback: savedConfig.synchronousPlayback
+				synchronousPlayback: savedConfig.synchronousPlayback,
+				// 添加发送弹幕的配置
+				beforeEmit: (danmu) => {
+					console.log('发送弹幕:', danmu);
+					danmakuData.push(danmu);
+					return danmu;
+				}
 			})
 		);
 	}
 
     art = new Artplayer({
         container: '#player',
-        url: videoUrl,
-        type: 'm3u8',
-        title: currentVideoTitle,
-        volume: 0.8,
-        isLive: false,
-        muted: false,
-        autoplay: true,
-        pip: true,
+		url: videoUrl,
+		type: 'm3u8',
+		title: currentVideoTitle,
+		volume: 0.8,
+		isLive: false,
+		muted: false,
+		autoplay: false, // 改为 false，等弹幕加载完再播放
+		pip: true,
         autoSize: false,
         autoMini: true,
         screenshot: true,
@@ -800,8 +798,8 @@ function initPlayer(videoUrl) {
 			}
 		}
 
-		art.on('ready', () => {
-    hideControls();
+	art.on('ready', () => {
+		hideControls();
     
 		// 监听弹幕配置变化并保存
 		if (art.plugins && art.plugins.artplayerPluginDanmuku) {
@@ -828,7 +826,18 @@ function initPlayer(videoUrl) {
 					}
 				}
 			}, 2000);
+			 // 【新增】当弹幕加载完成后，重新加载弹幕数据
+			if (danmakuData.length > 0) {
+				setTimeout(() => {
+					console.log('🎯 延迟注入弹幕:', danmakuData.length);
+					danmakuPlugin.load(danmakuData);
+				}, 500);
+			}
 		}
+	});
+
+	art.on('fullscreenWeb', function (isFullScreen) {
+		handleFullScreen(isFullScreen, true);
 	});
 
 	// 在视频可以播放时加载弹幕
@@ -1079,7 +1088,6 @@ function playEpisode(index) {
     currentEpisodeIndex = index;
     currentVideoUrl = url;
     videoHasEnded = false;
-    danmakuData = []; // 清空弹幕缓存
 
     clearVideoProgress();
 
@@ -1089,22 +1097,23 @@ function playEpisode(index) {
     currentUrl.searchParams.delete('position');
     window.history.replaceState({}, '', currentUrl.toString());
 
-    // 先预加载弹幕，等待完成后再初始化播放器
+    // 先加载弹幕再初始化播放器
+	danmakuData = []; // 清空旧弹幕
 	preloadDanmaku()
 		.then(() => {
-			console.log('弹幕预加载完成，开始初始化播放器，弹幕数量:', danmakuData.length);
-			// 确保弹幕数据已经准备好再初始化播放器
+			console.log('✅ 弹幕加载完成，初始化播放器');
 			initPlayer(url);
+			updateEpisodeInfo();
+			updateButtonStates();
+			renderEpisodes();
 		})
 		.catch(e => {
-			console.error('预加载弹幕失败:', e);
-			// 即使弹幕加载失败，也要初始化播放器
+			console.error('❌ 弹幕加载失败，仍然初始化播放器:', e);
 			initPlayer(url);
+			updateEpisodeInfo();
+			updateButtonStates();
+			renderEpisodes();
 		});
-
-    updateEpisodeInfo();
-    updateButtonStates();
-    renderEpisodes();
 
     userClickedPosition = null;
 
