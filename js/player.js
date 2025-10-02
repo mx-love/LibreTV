@@ -591,7 +591,7 @@ function initPlayer(videoUrl) {
 				color: '#FFFFFF',
 				mode: 0,
 				modes: [0, 1, 2],  // 允许的模式：滚动、顶部、底部
-				margin: isMobile ? [5, '20%'] : [10, '25%'],
+				margin: [10, '75%'],
 				antiOverlap: true,
 				useWorker: true,
 				synchronousPlayback: false,
