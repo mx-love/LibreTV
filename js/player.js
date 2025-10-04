@@ -116,8 +116,9 @@ async function getDanmukuForVideo(title, episodeIndex) {
     }
 
     try {
-        // 1. 搜索动漫
-        const searchUrl = `${DANMU_CONFIG.baseUrl}/api/v2/search/anime?keyword=${encodeURIComponent(title)}`;
+        // 1. 搜索动漫 - 提取纯标题（去除年份等）
+        const cleanTitle = title.replace(/\([^)]*\)/g, '').replace(/【[^】]*】/g, '').trim();
+        const searchUrl = `${DANMU_CONFIG.baseUrl}/api/v2/search/anime?keyword=${encodeURIComponent(cleanTitle)}`;
         const searchResponse = await fetch(searchUrl);
         
         if (!searchResponse.ok) {
@@ -132,8 +133,18 @@ async function getDanmukuForVideo(title, episodeIndex) {
             return [];
         }
         
-        const anime = searchData.animes[0];
-        const animeId = anime.animeId;
+        // ✅ 智能匹配最佳结果
+        const bestMatch = findBestAnimeMatch(searchData.animes, cleanTitle);
+        if (!bestMatch) {
+            console.warn('无法找到最佳匹配:', title);
+            return [];
+        }
+        
+        const animeId = bestMatch.animeId;
+        const isMovie = bestMatch.type && (
+            bestMatch.type.includes('电影') || 
+            bestMatch.typeDescription?.includes('电影')
+        );
         
         // 2. 获取动漫详情
         const detailUrl = `${DANMU_CONFIG.baseUrl}/api/v2/bangumi/${animeId}`;
@@ -151,49 +162,220 @@ async function getDanmukuForVideo(title, episodeIndex) {
             return [];
         }
         
-        const episodes = detailData.bangumi.episodes;
-        if (episodeIndex >= episodes.length) {
-            console.warn('集数索引超出范围');
+        let episodes = detailData.bangumi.episodes;
+        
+        // ✅ 过滤掉特典、花絮等非正片集数
+        episodes = episodes.filter(ep => {
+            const title = ep.episodeTitle || '';
+            return !/(特典|花絮|番外|PV|预告|OP|ED|映像特典)/i.test(title);
+        });
+        
+        // ✅ 电影处理：直接取第一集
+        if (isMovie) {
+            if (episodes.length === 0) {
+                console.warn('电影没有找到弹幕源');
+                return [];
+            }
+            const episodeId = episodes[0].episodeId;
+            return await fetchDanmaku(episodeId, cacheKey);
+        }
+        
+        // ✅ 剧集处理：智能匹配集数
+        const matchedEpisode = findBestEpisodeMatch(episodes, episodeIndex, title);
+        if (!matchedEpisode) {
+            console.warn(`未找到第${episodeIndex + 1}集的弹幕`);
             return [];
         }
         
-        const episode = episodes[episodeIndex];
-        const episodeId = episode.episodeId;
-        
-        // 3. 获取弹幕评论
-        const commentUrl = `${DANMU_CONFIG.baseUrl}/api/v2/comment/${episodeId}?withRelated=true&chConvert=1`;
-        const commentResponse = await fetch(commentUrl);
-        
-        if (!commentResponse.ok) {
-            console.warn('获取弹幕失败');
-            return [];
-        }
-        
-        const commentData = await commentResponse.json();
-        
-        // 4. 转换为 ArtPlayer 弹幕格式
-		const danmakuList = [];
-		if (commentData.comments && Array.isArray(commentData.comments)) {
-			commentData.comments.forEach(comment => {
-				const params = comment.p ? comment.p.split(',') : [];
-				const colorValue = parseInt(params[2] || 16777215); // 默认白色
-        
-				danmakuList.push({
-					text: comment.m || '',
-					time: parseFloat(params[0] || 0),
-					mode: 0,  // 强制所有弹幕滚动
-					color: '#' + colorValue.toString(16).padStart(6, '0').toUpperCase(),
-				});
-			});
-		}
-
-danmuCache[cacheKey] = danmakuList;
-return danmakuList;
+        const episodeId = matchedEpisode.episodeId;
+        return await fetchDanmaku(episodeId, cacheKey);
         
     } catch (error) {
         console.error('获取弹幕失败:', error);
         return [];
     }
+}
+
+// ✅ 新增：智能匹配最佳动漫结果
+function findBestAnimeMatch(animes, targetTitle) {
+    if (!animes || animes.length === 0) return null;
+    
+    // 计算相似度得分
+    const scored = animes.map(anime => {
+        const animeTitle = (anime.animeTitle || '').replace(/\([^)]*\)/g, '').replace(/【[^】]*】/g, '').trim();
+        
+        let score = 0;
+        
+        // 完全匹配得最高分
+        if (animeTitle === targetTitle) {
+            score += 1000;
+        }
+        
+        // 包含目标标题
+        if (animeTitle.includes(targetTitle)) {
+            score += 500;
+        }
+        
+        // 目标标题包含动漫标题
+        if (targetTitle.includes(animeTitle)) {
+            score += 300;
+        }
+        
+        // 字符串相似度（简单实现）
+        const similarity = calculateSimilarity(animeTitle, targetTitle);
+        score += similarity * 200;
+        
+        // 优先选择集数较多的（更可能是正片）
+        if (anime.episodeCount) {
+            score += Math.min(anime.episodeCount, 50);
+        }
+        
+        return { anime, score };
+    });
+    
+    // 按得分排序，取最高分
+    scored.sort((a, b) => b.score - a.score);
+    
+    console.log('弹幕源匹配得分:', scored.map(s => ({
+        title: s.anime.animeTitle,
+        score: s.score
+    })));
+    
+    return scored[0].anime;
+}
+
+// ✅ 新增：智能匹配集数
+function findBestEpisodeMatch(episodes, targetIndex, showTitle) {
+    if (!episodes || episodes.length === 0) return null;
+    
+    // 尝试从标题中提取集数信息
+    const episodesWithNumbers = episodes.map((ep, idx) => {
+        const title = ep.episodeTitle || '';
+        
+        // 提取集数（支持多种格式）
+        const patterns = [
+            /第(\d+)[集话話]/,
+            /[Ee][Pp]?\.?(\d+)/,
+            /\b(\d+)\b/
+        ];
+        
+        let episodeNumber = null;
+        for (const pattern of patterns) {
+            const match = title.match(pattern);
+            if (match) {
+                episodeNumber = parseInt(match[1]);
+                break;
+            }
+        }
+        
+        return {
+            episode: ep,
+            number: episodeNumber !== null ? episodeNumber : (idx + 1), // 回退到序号
+            title: title
+        };
+    });
+    
+    // 目标集数（从0开始，需要+1）
+    const targetNumber = targetIndex + 1;
+    
+    // 查找匹配的集数
+    const matched = episodesWithNumbers.find(ep => ep.number === targetNumber);
+    
+    if (matched) {
+        console.log(`匹配到第${targetNumber}集:`, matched.title);
+        return matched.episode;
+    }
+    
+    // 如果没找到精确匹配，且索引在范围内，使用索引
+    if (targetIndex < episodes.length) {
+        console.warn(`未找到第${targetNumber}集的精确匹配，使用索引${targetIndex}`);
+        return episodes[targetIndex];
+    }
+    
+    return null;
+}
+
+// ✅ 新增：计算字符串相似度（简化版 Levenshtein）
+function calculateSimilarity(str1, str2) {
+    const longer = str1.length > str2.length ? str1 : str2;
+    const shorter = str1.length > str2.length ? str2 : str1;
+    
+    if (longer.length === 0) return 1.0;
+    
+    const editDistance = levenshteinDistance(longer, shorter);
+    return (longer.length - editDistance) / longer.length;
+}
+
+function levenshteinDistance(str1, str2) {
+    const matrix = [];
+    
+    for (let i = 0; i <= str2.length; i++) {
+        matrix[i] = [i];
+    }
+    
+    for (let j = 0; j <= str1.length; j++) {
+        matrix[0][j] = j;
+    }
+    
+    for (let i = 1; i <= str2.length; i++) {
+        for (let j = 1; j <= str1.length; j++) {
+            if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+                matrix[i][j] = matrix[i - 1][j - 1];
+            } else {
+                matrix[i][j] = Math.min(
+                    matrix[i - 1][j - 1] + 1,
+                    matrix[i][j - 1] + 1,
+                    matrix[i - 1][j] + 1
+                );
+            }
+        }
+    }
+    
+    return matrix[str2.length][str1.length];
+}
+
+// ✅ 新增：获取弹幕的独立函数
+async function fetchDanmaku(episodeId, cacheKey) {
+    const commentUrl = `${DANMU_CONFIG.baseUrl}/api/v2/comment/${episodeId}?withRelated=true&chConvert=1`;
+    const commentResponse = await fetch(commentUrl);
+    
+    if (!commentResponse.ok) {
+        console.warn('获取弹幕失败');
+        return [];
+    }
+    
+    const commentData = await commentResponse.json();
+    
+    const danmakuList = [];
+    if (commentData.comments && Array.isArray(commentData.comments)) {
+        commentData.comments.forEach(comment => {
+            const params = comment.p ? comment.p.split(',') : [];
+            const colorValue = parseInt(params[2] || 16777215);
+            
+            // ✅ 从 params[1] 获取弹幕模式
+            let mode = parseInt(params[1] || 0);
+            
+            // 弹幕模式映射：
+            // 0-2: 滚动弹幕 -> ArtPlayer mode 0
+            // 4: 底部弹幕 -> ArtPlayer mode 2  
+            // 5: 顶部弹幕 -> ArtPlayer mode 1
+            if (mode >= 4 && mode <= 5) {
+                mode = mode === 4 ? 2 : 1;  // 4=底部, 5=顶部
+            } else {
+                mode = 0;  // 其他都是滚动
+            }
+            
+            danmakuList.push({
+                text: comment.m || '',
+                time: parseFloat(params[0] || 0),
+                mode: mode,  // ✅ 使用实际的弹幕模式
+                color: '#' + colorValue.toString(16).padStart(6, '0').toUpperCase(),
+            });
+        });
+    }
+    
+    danmuCache[cacheKey] = danmakuList;
+    return danmakuList;
 }
 
 // 兼容旧的函数名
@@ -584,17 +766,17 @@ function initPlayer(videoUrl) {
         },
         plugins: [
 			artplayerPluginDanmuku({
-				danmuku: getDanmukuUrl, // 注意：这里传递函数引用，不是调用
+				danmuku: getDanmukuUrl,
 				speed: 5,
 				opacity: 1,
 				fontSize: isMobile ? 20 : 25,
 				color: '#FFFFFF',
 				mode: 0,
-				modes: [0, 1, 2],  // 允许的模式：滚动、顶部、底部
+				modes: [0, 1, 2],
 				margin: [10, '75%'],
 				antiOverlap: true,
 				useWorker: true,
-				synchronousPlayback: false,
+				synchronousPlayback: true,  // ✅ 改为 true，启用同步播放
 				filter: (danmu) => danmu.text.length <= 50,
 				lockTime: 5,
 				maxLength: 100,
@@ -763,6 +945,29 @@ function initPlayer(videoUrl) {
             }
         }
     }
+    
+    // ✅ 在这里添加 seek 事件监听
+    art.on('seek', function(currentTime) {
+        if (art.plugins.artplayerPluginDanmuku) {
+            art.plugins.artplayerPluginDanmuku.reset();
+            if (typeof art.plugins.artplayerPluginDanmuku.seek === 'function') {
+                art.plugins.artplayerPluginDanmuku.seek(currentTime);
+            }
+        }
+    });
+
+    // ✅ 在这里添加 timeupdate 事件监听（可选）
+    art.on('video:timeupdate', function() {
+        if (art.plugins.artplayerPluginDanmuku && art.video) {
+            const currentTime = art.video.currentTime;
+            const danmuTime = art.plugins.artplayerPluginDanmuku.currentTime || 0;
+            if (Math.abs(danmuTime - currentTime) > 1) {
+                if (typeof art.plugins.artplayerPluginDanmuku.seek === 'function') {
+                    art.plugins.artplayerPluginDanmuku.seek(currentTime);
+                }
+            }
+        }
+    });
 
     // 播放器加载完成后初始隐藏工具栏
     art.on('ready', () => {
@@ -820,6 +1025,35 @@ function initPlayer(videoUrl) {
         // 启动定期保存播放进度
         startProgressSaveInterval();
     })
+    
+    // ✅ 监听进度跳转事件，同步弹幕时间
+	art.on('seek', function(currentTime) {
+		if (art.plugins.artplayerPluginDanmuku) {
+			// 清除当前显示的弹幕
+			art.plugins.artplayerPluginDanmuku.reset();
+        
+			// 手动设置弹幕时间到新的播放位置
+			// 注意：某些弹幕插件可能需要使用 seek 方法
+			if (typeof art.plugins.artplayerPluginDanmuku.seek === 'function') {
+				art.plugins.artplayerPluginDanmuku.seek(currentTime);
+			}
+		}
+	});
+
+	// ✅ 监听 timeupdate 确保弹幕保持同步
+	art.on('video:timeupdate', function() {
+		if (art.plugins.artplayerPluginDanmuku && art.video) {
+				const currentTime = art.video.currentTime;
+			// 检查弹幕时间是否与视频时间不同步（误差超过1秒）
+			const danmuTime = art.plugins.artplayerPluginDanmuku.currentTime || 0;
+			if (Math.abs(danmuTime - currentTime) > 1) {
+				// 重新同步弹幕时间
+				if (typeof art.plugins.artplayerPluginDanmuku.seek === 'function') {
+					art.plugins.artplayerPluginDanmuku.seek(currentTime);
+				}
+			}
+		}
+	});
 
     // 错误处理
     art.on('video:error', function (error) {
@@ -1150,21 +1384,19 @@ function updateOrderButton() {
 
 // 设置进度条准确点击处理
 function setupProgressBarPreciseClicks() {
-    // 查找DPlayer的进度条元素
+    // 查找进度条元素
     const progressBar = document.querySelector('.dplayer-bar-wrap');
     if (!progressBar || !art || !art.video) return;
 
     // 移除可能存在的旧事件监听器
     progressBar.removeEventListener('mousedown', handleProgressBarClick);
+    progressBar.removeEventListener('touchstart', handleProgressBarTouch);
 
     // 添加新的事件监听器
     progressBar.addEventListener('mousedown', handleProgressBarClick);
-
-    // 在移动端也添加触摸事件支持
-    progressBar.removeEventListener('touchstart', handleProgressBarTouch);
     progressBar.addEventListener('touchstart', handleProgressBarTouch);
 
-    // 处理进度条点击
+    // ✅ 处理进度条点击（桌面端）
     function handleProgressBarClick(e) {
         if (!art || !art.video) return;
 
@@ -1178,22 +1410,30 @@ function setupProgressBarPreciseClicks() {
 
         // 处理视频接近结尾的情况
         if (duration - clickTime < 1) {
-            // 如果点击位置非常接近结尾，稍微往前移一点
             clickTime = Math.min(clickTime, duration - 1.5);
-
         }
 
         // 记录用户点击的位置
         userClickedPosition = clickTime;
 
-        // 阻止默认事件传播，避免DPlayer内部逻辑将视频跳至末尾
+        // 阻止默认事件传播
         e.stopPropagation();
 
-        // 直接设置视频时间
+        // 跳转视频进度
         art.seek(clickTime);
+
+        // ✅ 手动同步弹幕时间
+        if (art.plugins.artplayerPluginDanmuku) {
+            setTimeout(() => {
+                art.plugins.artplayerPluginDanmuku.reset();
+                if (typeof art.plugins.artplayerPluginDanmuku.seek === 'function') {
+                    art.plugins.artplayerPluginDanmuku.seek(clickTime);
+                }
+            }, 100);
+        }
     }
 
-    // 处理移动端触摸事件
+    // ✅ 处理移动端触摸事件
     function handleProgressBarTouch(e) {
         if (!art || !art.video || !e.touches[0]) return;
 
@@ -1214,6 +1454,16 @@ function setupProgressBarPreciseClicks() {
 
         e.stopPropagation();
         art.seek(clickTime);
+
+        // ✅ 同步弹幕
+        if (art.plugins.artplayerPluginDanmuku) {
+            setTimeout(() => {
+                art.plugins.artplayerPluginDanmuku.reset();
+                if (typeof art.plugins.artplayerPluginDanmuku.seek === 'function') {
+                    art.plugins.artplayerPluginDanmuku.seek(clickTime);
+                }
+            }, 100);
+        }
     }
 }
 
